@@ -1,51 +1,48 @@
-from flask import Flask, request, render_template_string
-import urllib.parse
-import os
+from flask import Flask, render_template_string
 
 app = Flask(__name__)
 
-# CONFIG BOSS - change ici
-NUMERO_GAGNANT = 7
-COTE_DU_JOUR = 5.75
+NUMERO_WHATSAPP = "225554762656"
 
-produits = {"chaussure": [5000, 8000, 10], "sac": [3000, 5500, 5]}
-benefice_total = 0
+produits = [
+    {"id": 1, "nom": "Chaussure Élégante", "prix": 15000, "stock": 100, "image": "👟"},
+    {"id": 2, "nom": "Sac à Main", "prix": 12000, "stock": 100, "image": "👜"},
+    {"id": 3, "nom": "Montre Classique", "prix": 20000, "stock": 100, "image": "⌚"},
+]
 
 HTML = """
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:sans-serif;background:#f0f0f0;padding:15px}.box{background:white;padding:20px;border-radius:15px;margin-bottom:20px}input,button{width:100%;padding:12px;margin:8px 0;border-radius:8px;border:1px solid #ccc}button{background:#25D366;color:white;font-weight:bold;border:none}.gagne{background:#d4edda;padding:15px;border-radius:10px}.perdu{background:#f8d7da;padding:15px;border-radius:10px}</style>
-</head><body>
-<div class="box"><h2>🎰 LOTO - Cote {{cote}}</h2><form method="post" action="/loto"><input type="number" name="mise" placeholder="Mise FCFA" required><input type="number" name="numero" placeholder="Numéro 1-100" required><button>JOUER</button></form>{% if loto %}<div class="{{cl}}">{{loto}}</div>{% endif %}</div>
-<div class="box"><h2>🛍️ BOUTIQUE</h2><p>Stock: {% for k,v in produits.items() %}{{k}}({{v[2]}}) {% endfor %} | Bénéf: {{benef}} FCFA</p><form method="post" action="/vendre"><input type="text" name="client" placeholder="Nom client" required><input type="text" name="tel" placeholder="2250..." required><input type="text" name="prod" placeholder="Produit" required><input type="number" name="qte" placeholder="Qté" required><button>VENDRE + WHATSAPP</button></form>{% if recu %}<div class="gagne">{{recu}}<br><br><a href="{{lien}}" target="_blank"><button>OUVRIR WHATSAPP</button></a></div>{% endif %}</div>
-</body></html>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ma Boutique - Abel</title>
+<style>
+body{font-family:Arial; padding:15px; background:#f5f5f5; margin:0}
+h1{text-align:center; color:#333}
+.card{background:white; padding:15px; margin:12px 0; border-radius:12px; box-shadow:0 2px 8px #ddd}
+.btn{background:#25D366; color:white; padding:14px; border:none; border-radius:10px; width:100%; font-size:17px; font-weight:bold; text-decoration:none; display:block; text-align:center; margin-top:12px}
+.prix{color:#25D366; font-weight:bold; font-size:20px}
+.stock{color:green}
+</style>
+</head>
+<body>
+<h1>🛍️ Ma Boutique</h1>
+<p style="text-align:center">Livraison partout en Côte d'Ivoire</p>
+{% for p in produits %}
+<div class="card">
+<h3>{{p.image}} {{p.nom}}</h3>
+<p class="prix">{{p.prix}} FCFA</p>
+<p class="stock">Stock: {{p.stock}} disponible ✅</p>
+<a class="btn" href="https://wa.me/{{numero}}?text=Bonjour Abel, je veux commander {{p.nom}} à {{p.prix}} FCFA" target="_blank">💬 Commander sur WhatsApp</a>
+</div>
+{% endfor %}
+</body>
+</html>
 """
 
 @app.route("/")
 def home():
-    return render_template_string(HTML, cote=COTE_DU_JOUR, produits=produits, benef=benefice_total, loto=None, recu=None)
+    return render_template_string(HTML, produits=produits, numero=NUMERO_WHATSAPP)
 
-@app.route("/loto", methods=["POST"])
-def loto():
-    mise=int(request.form["mise"]); num=int(request.form["numero"])
-    if num==NUMERO_GAGNANT:
-        gain=int(mise*COTE_DU_JOUR)
-        msg=f"🎉 GAGNÉ ! C'était {NUMERO_GAGNANT}. Tu gagnes {gain} FCFA"
-        cl="gagne"
-    else:
-        msg=f"😭 Perdu ! C'était {NUMERO_GAGNANT}"; cl="perdu"
-    return render_template_string(HTML, cote=COTE_DU_JOUR, produits=produits, benef=benefice_total, loto=msg, cl=cl, recu=None)
-
-@app.route("/vendre", methods=["POST"])
-def vendre():
-    global benefice_total
-    client=request.form["client"]; tel=request.form["tel"]; prod=request.form["prod"].lower(); qte=int(request.form["qte"])
-    if prod not in produits or produits[prod][2]<qte:
-        return render_template_string(HTML, cote=COTE_DU_JOUR, produits=produits, benef=benefice_total, loto=None, recu="Stock insuffisant", lien="#")
-    pa,pv,st=produits[prod]; total=pv*qte; benef=(pv-pa)*qte; produits[prod][2]-=qte; benefice_total+=benef
-    recu_txt=f"🧾 REÇU\nClient:{client}\nProduit:{prod} x{qte}\nTOTAL:{total} FCFA\nMerci!"
-    lien=f"https://wa.me/{tel}?text={urllib.parse.quote(recu_txt)}"
-    return render_template_string(HTML, cote=COTE_DU_JOUR, produits=produits, benef=benefice_total, loto=None, recu=recu_txt, lien=lien)
-
-if __name__=="__main__":
-    port=int(os.environ.get("PORT",5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    app.run()
