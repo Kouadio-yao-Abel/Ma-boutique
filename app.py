@@ -2,7 +2,7 @@ from flask import Flask, render_template_string, request, session, redirect
 import random, time
 
 app = Flask(__name__)
-app.secret_key = "abel_final_securise"
+app.secret_key = "abel_final_securise_v4"
 
 NUMEROS_PAIEMENT = {"WAVE": "0554762656", "MTN": "0554762656", "ORANGE": "0767911881"}
 NUMEROS_CREATEUR = ["0554762656", "0767911881"]
@@ -63,10 +63,10 @@ Solde: <span style="color:green; font-size:22px; font-weight:bold">{{solde}} F</
 
 <div class="card">
 <h3>🎲 JOUER (1 à 100)</h3>
-<p>Côte: x{{config.cote}} | Mise min: {{config.mise_min}}F</p>
+<p>Côte: x{{config.cote}} | Mise min: {{config.mise_min}}F | Ton solde: {{solde}}F</p>
 <form method="POST" action="/jouer">
 <input type="number" name="choix" placeholder="Numéro 1-100" min="1" max="100" required>
-<input type="number" name="mise" placeholder="Mise max {{solde}}" min="200" max="{{solde}}" required>
+<input type="number" name="mise" placeholder="Mise min 200 F" min="200" required>
 <button class="btn btn-blue" type="submit">JOUER</button>
 </form>
 </div>
@@ -107,6 +107,9 @@ def deposer():
     tel = session.get('tel')
     if not tel: return redirect("/")
     op = request.form['operateur']; montant = int(request.form['montant']); id_trx = request.form['id_transaction'].strip()
+    if montant < 200:
+        session['msg'] = "❌ Montant minimum 200F"
+        return redirect("/")
     depots_en_attente.append({'tel': tel, 'operateur': op, 'montant': montant, 'id_transaction': id_trx, 'statut': 'attente', 'date': time.strftime("%H:%M %d/%m")})
     session['msg'] = f"✅ Demande de {montant}F via {op} envoyée ! En attente de validation."
     return redirect("/")
@@ -117,7 +120,14 @@ def jouer():
     if not tel: return redirect("/")
     solde = get_solde(tel)
     choix = int(request.form['choix']); mise = int(request.form['mise'])
-    if mise > solde or mise < 200: session['msg'] = f"❌ Solde insuffisant {solde}F"; return redirect("/")
+    
+    if mise < 200:
+        session['msg'] = "❌ Mise minimum 200F !"
+        return redirect("/")
+    if mise > solde:
+        session['msg'] = f"❌ Solde insuffisant ! Tu as {solde}F, recharge d'abord"
+        return redirect("/")
+
     gagnant = config_jeu['numero_gagnant']; cote = config_jeu['cote']
     users[tel]['solde'] -= mise
     if choix == gagnant:
