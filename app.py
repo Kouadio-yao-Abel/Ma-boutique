@@ -1,153 +1,172 @@
-from flask import Flask, render_template_string, request, session, redirect
-import random
+from flask import Flask, render_template_string, request, session, redirect, jsonify
+import random, time
 
 app = Flask(__name__)
-app.secret_key = "abel_secret_2026"
+app.secret_key = "abel_secret_2026_final"
 
-NUMERO_WHATSAPP = "2250507961624"
-MOT_DE_PASSE_ADMIN = "Abel123"
-
-config_jeu = {
-    "numero_gagnant": random.randint(1, 100),
-    "cote": random.randint(2, 10),
-    "mise_min": 200,
-    "max_num": 100
+# TES NUMÉROS DE RÉCEPTION
+NUMEROS_PAIEMENT = {
+    "WAVE": "0554762656",
+    "MTN": "0554762656",
+    "ORANGE": "0767911881"
 }
 
-produits = [
-    {"nom": "Chaussure", "prix": 15000, "stock": 100, "image": "👟"},
-    {"nom": "Sac", "prix": 12000, "stock": 100, "image": "👜"},
-]
+config_jeu = {"numero_gagnant": random.randint(1,100), "cote": random.randint(2,10), "mise_min": 200}
 
-HTML_HOME = """
+# FAUSSE BASE DE DONNÉES (après on mettra une vraie DB)
+users = {} # {telephone: {solde: 0, nom: ""}}
+depots_en_attente = [] # liste des dépôts
+historique_jeux = []
+
+HTML = """
 <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ma Boutique + Loto</title>
+<title>Boutique Loto CI</title>
 <style>
-body{font-family:Arial; padding:15px; background:#f5f5f5}
-.card{background:white; padding:15px; margin:12px 0; border-radius:12px; box-shadow:0 2px 5px #ddd}
-.btn{padding:14px; border:none; border-radius:10px; width:100%; font-size:17px; font-weight:bold; display:block; text-align:center; text-decoration:none; margin-top:10px}
-.btn-green{background:#25D366; color:white} .btn-blue{background:#007bff; color:white}
-input{width:100%; padding:12px; margin:6px 0; border-radius:8px; border:1px solid #ccc; box-sizing:border-box}
-.alert-red{background:#ffdddd; color:red; padding:10px; border-radius:8px; border:1px solid red; margin:10px 0}
-</style></head>
-<body>
-<h1>🛍️ Ma Boutique</h1>
-{% for p in produits %}
+body{font-family:Arial; padding:15px; background:#f0f2f5} .card{background:white; padding:15px; margin:12px 0; border-radius:12px; box-shadow:0 2px 5px #ddd}
+.btn{padding:14px; border:none; border-radius:10px; width:100%; font-weight:bold; display:block; text-align:center; text-decoration:none; margin-top:8px; cursor:pointer}
+.btn-green{background:#25D366; color:white} .btn-blue{background:#007bff; color:white} .btn-orange{background:#FF7900; color:white} .btn-yellow{background:#FFCC00; color:black}
+input, select{width:100%; padding:12px; margin:6px 0; border-radius:8px; border:1px solid #ccc; box-sizing:border-box}
+.badge{padding:5px 10px; border-radius:20px; font-size:12px; color:white} .bg-wait{background:orange} .bg-ok{background:green}
+</style></head><body>
+<h2>🎰 LOTO CI 1-100 | Solde: {{solde}} F</h2>
+{% if user_tel %}
 <div class="card">
-<h3>{{p.image}} {{p.nom}}</h3><p style="color:#25D366; font-weight:bold">{{p.prix}} FCFA - Stock: {{p.stock}} ✅</p>
-<a class="btn btn-green" href="https://wa.me/{{numero}}?text=Je veux commander {{p.nom}}" target="_blank">Commander WhatsApp</a>
-</div>
-{% endfor %}
-<hr><h1>🎰 JEU LOTO - 1 à 100</h1>
-<div class="card">
-<p>Côte: <b>x{{config.cote}}</b> | Mise min: <b>{{config.mise_min}} FCFA</b></p>
-<form method="POST" action="/jouer">
-<input type="number" name="choix" placeholder="Ton numéro (1-100)" required min="1" max="100">
-<input type="number" name="mise" placeholder="Ta mise min 200F" required min="200">
-<button class="btn btn-blue" type="submit">JOUER</button>
+<b>{{user_tel}}</b> - Solde: <span style="color:green; font-size:20px">{{solde}} F</span>
+<a href="/logout" style="float:right">Sortir</a>
+<h3>💰 DÉPOSER (comme Melbet)</h3>
+<form method="POST" action="/deposer">
+<select name="operateur" required><option value="">Choisir</option><option value="WAVE">WAVE - {{nums.WAVE}}</option><option value="MTN">MTN - {{nums.MTN}}</option><option value="ORANGE">ORANGE - {{nums.ORANGE}}</option></select>
+<input type="number" name="montant" placeholder="Montant min 200" min="200" required>
+<input type="text" name="id_transaction" placeholder="ID transaction après transfert (ex: W123456)" required>
+<button class="btn btn-green" type="submit">J'ai payé, confirmer</button>
 </form>
-{% if erreur %}<div class="alert-red">{{erreur}}</div>{% endif %}
-{% if resultat %}<h2>{{resultat}}</h2>
-{% if gagne %}<a class="btn btn-green" href="https://wa.me/{{numero}}?text={{msg_win}}" target="_blank">💰 Réclamer gain WhatsApp</a>{% endif %}{% endif %}
+<p style="font-size:12px; color:grey">1. Transfère l'argent sur le numéro affiché<br>2. Copie l'ID de transaction<br>3. Attends validation admin (5 min)</p>
 </div>
-</body></html>
+
+<div class="card">
+<p>Côte: x{{config.cote}} | Mise min: {{config.mise_min}}F</p>
+<form method="POST" action="/jouer">
+<input type="number" name="choix" placeholder="Numéro 1-100" min="1" max="100" required>
+<input type="number" name="mise" placeholder="Mise (pris sur ton solde)" min="200" max="{{solde}}" required>
+<button class="btn btn-blue" type="submit">JOUER {{config.mise_min}}F min</button>
+</form>
+{% if msg %}<h3>{{msg}}</h3>{% endif %}
+</div>
+
+{% else %}
+<div class="card">
+<h3>Connexion Joueur</h3>
+<form method="POST" action="/login">
+<input type="text" name="tel" placeholder="Ton numéro (ex: 0701234567)" required>
+<button class="btn btn-blue" type="submit">Entrer & Jouer</button>
+</form>
+</div>
+{% endif %}
+
+<p><a href="/admin">Admin</a></p></body></html>
 """
 
-HTML_LOGIN = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin</title>
-<style>body{font-family:Arial; padding:15px} input{width:100%; padding:12px; margin:6px 0; border-radius:8px; border:1px solid #ccc} .btn{background:black; color:white; padding:14px; width:100%; border-radius:10px}</style>
-</head><body><h1>🔒 Admin</h1><div style="background:white; padding:15px; border-radius:12px">
-<form method="POST"><input type="password" name="password" placeholder="Mot de passe" required><button class="btn" type="submit">Entrer</button></form>
-{% if error %}<p style="color:red">{{error}}</p>{% endif %}</div></body></html>"""
-
-HTML_ADMIN = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin</title>
-<style>body{font-family:Arial; padding:15px} .btn{background:black; color:white; padding:14px; width:100%; border-radius:10px; margin:5px 0; border:none; font-weight:bold} .btn-rand{background:#ff9800; color:white}</style>
+HTML_ADMIN = """
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Dépôts</title>
+<style>body{font-family:Arial; padding:15px} .card{background:white; padding:15px; margin:10px 0; border-radius:10px; box-shadow:0 2px 5px #ddd} .btn{padding:10px; border:none; border-radius:8px; font-weight:bold; color:white; cursor:pointer} .btn-ok{background:green} .btn-no{background:red}</style>
 </head><body>
-<h1>🔒 ADMIN</h1>
-<div style="background:white; padding:15px; border-radius:12px">
-<p>Gagnant: <b>{{config.numero_gagnant}}</b> (1-100) | Côte: <b>x{{config.cote}}</b></p>
-<form method="POST" action="/admin/update">
-<button name="action" value="random" class="btn btn-rand" type="submit">🎲 GÉNÉRER ALÉATOIREMENT (1-100)</button>
+<h1>ADMIN - Dépôts à valider</h1>
+<h3>Gagnant actuel: {{config.numero_gagnant}} | Côte: x{{config.cote}} | <a href="/admin/random">🎲 Nouveau tirage</a></h3>
+{% for d in depots %}
+<div class="card">
+<b>{{d.tel}}</b> veut {{d.montant}}F via {{d.operateur}} vers {{nums[d.operateur]}}<br>
+ID: {{d.id_transaction}} | Date: {{d.date}} | <span class="badge bg-wait">{{d.statut}}</span>
+{% if d.statut == 'attente' %}
+<form method="POST" action="/admin/valider" style="display:inline">
+<input type="hidden" name="index" value="{{loop.index0}}">
+<button class="btn btn-ok" type="submit">✅ Valider (créditer solde)</button>
 </form>
-<hr>
-<form method="POST" action="/admin/update">
-<input type="number" name="numero_gagnant" placeholder="Numéro 1-100" min="1" max="100">
-<input type="number" name="cote" placeholder="Côte ex: 5" min="1">
-<button name="action" value="manual" class="btn" type="submit">Mettre à jour manuel</button>
+<form method="POST" action="/admin/refuser" style="display:inline">
+<input type="hidden" name="index" value="{{loop.index0}}">
+<button class="btn btn-no" type="submit">❌ Refuser</button>
 </form>
-<br><a href="/admin/logout">Déconnexion</a> | <a href="/">Boutique</a>
-</div></body></html>"""
+{% endif %}
+</div>
+{% else %}
+<p>Aucun dépôt</p>
+{% endfor %}
+<a href="/">Retour</a></body></html>
+"""
+
+def get_solde(tel):
+    return users.get(tel, {}).get('solde', 0)
 
 @app.route("/")
 def home():
-    return render_template_string(HTML_HOME, produits=produits, config=config_jeu, numero=NUMERO_WHATSAPP, resultat=None, erreur=None)
+    tel = session.get('tel')
+    solde = get_solde(tel) if tel else 0
+    return render_template_string(HTML, user_tel=tel, solde=solde, config=config_jeu, nums=NUMEROS_PAIEMENT, msg=session.pop('msg', None))
+
+@app.route("/login", methods=["POST"])
+def login():
+    tel = request.form['tel']
+    session['tel'] = tel
+    if tel not in users:
+        users[tel] = {'solde': 0, 'nom': tel}
+    return redirect("/")
+
+@app.route("/logout")
+def logout(): session.pop('tel', None); return redirect("/")
+
+@app.route("/deposer", methods=["POST"])
+def deposer():
+    tel = session.get('tel')
+    if not tel: return redirect("/")
+    op = request.form['operateur']; montant = int(request.form['montant']); id_trx = request.form['id_transaction']
+    if montant < 200: session['msg'] = "❌ Minimum 200F"; return redirect("/")
+    depots_en_attente.append({'tel': tel, 'operateur': op, 'montant': montant, 'id_transaction': id_trx, 'statut': 'attente', 'date': time.strftime("%H:%M %d/%m")})
+    session['msg'] = f"✅ Demande envoyée ! Transfère {montant}F sur {NUMEROS_PAIEMENT[op]} ({op}) puis attends validation."
+    return redirect("/")
 
 @app.route("/jouer", methods=["POST"])
 def jouer():
-    try:
-        choix = int(request.form["choix"])
-        mise = int(request.form["mise"])
-    except:
-        return render_template_string(HTML_HOME, produits=produits, config=config_jeu, numero=NUMERO_WHATSAPP, resultat=None, erreur="Entre des nombres valides !", gagne=False)
-
-    if mise < config_jeu["mise_min"]:
-        return render_template_string(HTML_HOME, produits=produits, config=config_jeu, numero=NUMERO_WHATSAPP, resultat=None, erreur=f"❌ Minimum {config_jeu['mise_min']} FCFA ! Tu as mis {mise}F", gagne=False)
-    
-    if choix < 1 or choix > 100:
-        return render_template_string(HTML_HOME, produits=produits, config=config_jeu, numero=NUMERO_WHATSAPP, resultat=None, erreur="❌ Numéro doit être entre 1 et 100", gagne=False)
-
-    gagnant = config_jeu["numero_gagnant"]
-    cote = config_jeu["cote"]
-    
+    tel = session.get('tel')
+    if not tel: return redirect("/")
+    solde = get_solde(tel)
+    choix = int(request.form['choix']); mise = int(request.form['mise'])
+    if mise < 200 or mise > solde: session['msg'] = f"❌ Solde insuffisant ! Tu as {solde}F"; return redirect("/")
+    gagnant = config_jeu['numero_gagnant']; cote = config_jeu['cote']
+    users[tel]['solde'] -= mise
     if choix == gagnant:
         gain = mise * cote
-        resultat = f"🎉 GAGNÉ ! C'était {gagnant}. Tu gagnes {gain} FCFA (x{cote}) !"
-        msg = f"J'ai gagné au Loto 1-100 ! Mise {mise}F sur {choix}, gagnant {gagnant}, gain {gain}F (côte x{cote})"
-        config_jeu["numero_gagnant"] = random.randint(1, 100)
-        config_jeu["cote"] = random.randint(2, 10)
-        return render_template_string(HTML_HOME, produits=produits, config=config_jeu, numero=NUMERO_WHATSAPP, resultat=resultat, gagne=True, msg_win=msg, erreur=None)
+        users[tel]['solde'] += gain
+        msg = f"🎉 GAGNÉ ! {gagnant} = {choix} | Tu gagnes {gain}F ! Nouveau solde: {users[tel]['solde']}F"
+        config_jeu['numero_gagnant'] = random.randint(1,100); config_jeu['cote'] = random.randint(2,10)
     else:
-        resultat = f"😭 Perdu... {choix} ≠ {gagnant}. Nouveau tirage lancé !"
-        config_jeu["numero_gagnant"] = random.randint(1, 100)
-        config_jeu["cote"] = random.randint(2, 10)
-        return render_template_string(HTML_HOME, produits=produits, config=config_jeu, numero=NUMERO_WHATSAPP, resultat=resultat, gagne=False, erreur=None)
-
-@app.route("/admin", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "POST":
-        if request.form["password"] == MOT_DE_PASSE_ADMIN:
-            session["admin"] = True
-            return redirect("/admin/panel")
-        else:
-            return render_template_string(HTML_LOGIN, error="Mot de passe incorrect !")
-    if session.get("admin"):
-        return redirect("/admin/panel")
-    return render_template_string(HTML_LOGIN, error=None)
-
-@app.route("/admin/panel")
-def admin_panel():
-    if not session.get("admin"):
-        return redirect("/admin")
-    return render_template_string(HTML_ADMIN, config=config_jeu)
-
-@app.route("/admin/update", methods=["POST"])
-def admin_update():
-    if not session.get("admin"):
-        return redirect("/admin")
-    action = request.form.get("action")
-    if action == "random":
-        config_jeu["numero_gagnant"] = random.randint(1, 100)
-        config_jeu["cote"] = random.randint(2, 10)
-    else:
-        if request.form.get("numero_gagnant"):
-            config_jeu["numero_gagnant"] = int(request.form["numero_gagnant"])
-        if request.form.get("cote"):
-            config_jeu["cote"] = int(request.form["cote"])
-    return render_template_string(HTML_ADMIN, config=config_jeu)
-
-@app.route("/admin/logout")
-def logout():
-    session.pop("admin", None)
+        msg = f"😭 Perdu {choix} != {gagnant}. Il te reste {users[tel]['solde']}F. Nouveau tirage !"
+        config_jeu['numero_gagnant'] = random.randint(1,100); config_jeu['cote'] = random.randint(2,10)
+    session['msg'] = msg
     return redirect("/")
+
+@app.route("/admin")
+def admin():
+    return render_template_string(HTML_ADMIN, depots=depots_en_attente, config=config_jeu, nums=NUMEROS_PAIEMENT)
+
+@app.route("/admin/random")
+def admin_random():
+    config_jeu['numero_gagnant'] = random.randint(1,100); config_jeu['cote'] = random.randint(2,10)
+    return redirect("/admin")
+
+@app.route("/admin/valider", methods=["POST"])
+def valider():
+    idx = int(request.form['index'])
+    d = depots_en_attente[idx]
+    tel = d['tel']
+    if tel not in users: users[tel] = {'solde': 0}
+    users[tel]['solde'] += d['montant']
+    d['statut'] = 'validé'
+    return redirect("/admin")
+
+@app.route("/admin/refuser", methods=["POST"])
+def refuser():
+    idx = int(request.form['index'])
+    depots_en_attente[idx]['statut'] = 'refusé'
+    return redirect("/admin")
 
 if __name__ == "__main__":
     app.run()
