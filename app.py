@@ -2,12 +2,10 @@ from flask import Flask, render_template_string, request, session, redirect
 import random, time
 
 app = Flask(__name__)
-app.secret_key = "abel_final_v3"
+app.secret_key = "abel_final_securise"
 
-# TES NUMÉROS - C'EST LA CLÉ ADMIN
 NUMEROS_PAIEMENT = {"WAVE": "0554762656", "MTN": "0554762656", "ORANGE": "0767911881"}
-# Numéros qui débloquent l'espace créateur sur la même page
-NUMEROS_CREATEUR = ["0554762656", "0767911881", "0554762656"] 
+NUMEROS_CREATEUR = ["0554762656", "0767911881"]
 
 config_jeu = {"numero_gagnant": random.randint(1,100), "cote": random.randint(2,10), "mise_min": 200}
 users = {}
@@ -28,21 +26,19 @@ input, select{width:100%; padding:11px; margin:6px 0; border-radius:8px; border:
 
 {% if is_admin %}
 <div class="admin-zone">
-<h2 style="color:#FFD700; margin:0">👑 ESPACE CRÉATEUR (Toi seul vois ça)</h2>
-<p>Gagnant actuel: <b style="color:#FFD700; font-size:20px">{{config.numero_gagnant}}</b> | Côte x{{config.cote}} | <a href="/random" style="color:yellow">🎲 Nouveau tirage</a></p>
-<h3>💰 Dépôts à valider ({{depots|length}})</h3>
+<h2 style="color:#FFD700; margin:0">👑 ESPACE CRÉATEUR</h2>
+<p>Gagnant: <b style="color:#FFD700; font-size:20px">{{config.numero_gagnant}}</b> | Côte x{{config.cote}} | <a href="/random" style="color:yellow">🎲 Nouveau tirage</a></p>
+<h3>💰 Dépôts à valider</h3>
 {% for d in depots if d.statut == 'attente' %}
 <div style="background:#222; padding:10px; margin:8px 0; border-radius:8px; border-left:4px solid orange">
 <b>{{d.tel}}</b> : {{d.montant}}F via {{d.operateur}} vers {{nums[d.operateur]}}<br>
 ID: <code style="color:yellow">{{d.id_transaction}}</code> - {{d.date}}<br>
-<form method="POST" action="/valider" style="display:inline"><input type="hidden" name="index" value="{{loop.index0}}"><button class="btn btn-ok" type="submit">✅ VALIDER + Créditer</button></form>
+<form method="POST" action="/valider" style="display:inline"><input type="hidden" name="index" value="{{loop.index0}}"><button class="btn btn-ok" type="submit">✅ VALIDER</button></form>
 <form method="POST" action="/refuser" style="display:inline"><input type="hidden" name="index" value="{{loop.index0}}"><button class="btn btn-no" type="submit">❌ Refuser</button></form>
 </div>
 {% else %}
 <p>Aucun dépôt en attente</p>
 {% endfor %}
-<hr style="border-color:#444">
-<p style="font-size:11px; color:#aaa">Visible uniquement car tu es connecté avec {{user_tel}} (créateur)</p>
 </div>
 {% endif %}
 
@@ -55,18 +51,19 @@ Solde: <span style="color:green; font-size:22px; font-weight:bold">{{solde}} F</
 </div>
 
 <div class="card">
-<h3>💰 RECHARGER (Wave / MTN / Orange)</h3>
+<h3>💰 RECHARGER MON COMPTE</h3>
 <form method="POST" action="/deposer">
-<select name="operateur" required><option value="">-- Choisis --</option><option value="WAVE">WAVE -> {{nums.WAVE}}</option><option value="MTN">MTN -> {{nums.MTN}}</option><option value="ORANGE">ORANGE -> {{nums.ORANGE}}</option></select>
+<select name="operateur" required><option value="">-- Choisir opérateur --</option><option value="WAVE">WAVE</option><option value="MTN">MTN Money</option><option value="ORANGE">Orange Money</option></select>
 <input type="number" name="montant" placeholder="Montant min 200" min="200" required>
 <input type="text" name="id_transaction" placeholder="ID transaction" required>
-<button class="btn btn-green" type="submit">J'ai payé, confirmer</button>
+<button class="btn btn-green" type="submit">Confirmer dépôt</button>
 </form>
+<p style="font-size:12px; color:#666">Envoie l'argent sur le numéro de l'opérateur choisi puis colle l'ID ici</p>
 </div>
 
 <div class="card">
 <h3>🎲 JOUER (1 à 100)</h3>
-<p>Côte: x{{config.cote}} | Min: {{config.mise_min}}F</p>
+<p>Côte: x{{config.cote}} | Mise min: {{config.mise_min}}F</p>
 <form method="POST" action="/jouer">
 <input type="number" name="choix" placeholder="Numéro 1-100" min="1" max="100" required>
 <input type="number" name="mise" placeholder="Mise max {{solde}}" min="200" max="{{solde}}" required>
@@ -77,12 +74,11 @@ Solde: <span style="color:green; font-size:22px; font-weight:bold">{{solde}} F</
 {% else %}
 <div class="card">
 <h3>Entrer pour jouer</h3>
-<form method="POST" action="/login"><input type="text" name="tel" placeholder="Ton numéro" required><button class="btn btn-blue" type="submit">Entrer</button></form>
-<p style="font-size:11px">Astuce: si tu entres {{nums.WAVE}} ou {{nums.ORANGE}}, tu verras l'espace créateur</p>
+<form method="POST" action="/login"><input type="text" name="tel" placeholder="Ton numéro de téléphone" required><button class="btn btn-blue" type="submit">Entrer</button></form>
 </div>
 {% endif %}
 
-{% if msg %}<div class="alert {% if 'GAGNÉ' in msg or 'envoyée' in msg or 'Validé' in msg %}alert-green{% else %}alert-red{% endif %}">{{msg}}</div>{% endif %}
+{% if msg %}<div class="alert {% if 'GAGNÉ' in msg or 'Validé' in msg or 'envoyée' in msg %}alert-green{% else %}alert-red{% endif %}">{{msg}}</div>{% endif %}
 
 </body></html>
 """
@@ -93,7 +89,6 @@ def get_solde(tel): return users.get(tel, {}).get('solde', 0)
 def home():
     tel = session.get('tel')
     solde = get_solde(tel) if tel else 0
-    # ICI C'EST LA SÉCURITÉ: seul toi vois l'admin
     is_admin = tel in NUMEROS_CREATEUR if tel else False
     return render_template_string(HTML, user_tel=tel, solde=solde, config=config_jeu, nums=NUMEROS_PAIEMENT, msg=session.pop('msg', None), is_admin=is_admin, depots=depots_en_attente)
 
@@ -102,10 +97,6 @@ def login():
     tel = request.form['tel'].strip()
     session['tel'] = tel
     if tel not in users: users[tel] = {'solde': 0}
-    if tel in NUMEROS_CREATEUR:
-        session['msg'] = f"👑 Bienvenue Créateur {tel} ! Espace admin activé"
-    else:
-        session['msg'] = f"Bienvenue {tel} !"
     return redirect("/")
 
 @app.route("/logout")
@@ -117,7 +108,7 @@ def deposer():
     if not tel: return redirect("/")
     op = request.form['operateur']; montant = int(request.form['montant']); id_trx = request.form['id_transaction'].strip()
     depots_en_attente.append({'tel': tel, 'operateur': op, 'montant': montant, 'id_transaction': id_trx, 'statut': 'attente', 'date': time.strftime("%H:%M %d/%m")})
-    session['msg'] = f"✅ Demande {montant}F via {op} envoyée sur {NUMEROS_PAIEMENT[op]} ! En attente du créateur."
+    session['msg'] = f"✅ Demande de {montant}F via {op} envoyée ! En attente de validation."
     return redirect("/")
 
 @app.route("/jouer", methods=["POST"])
@@ -142,7 +133,7 @@ def jouer():
 @app.route("/valider", methods=["POST"])
 def valider():
     tel = session.get('tel')
-    if tel not in NUMEROS_CREATEUR: return redirect("/") # Sécurité: seul créateur peut valider
+    if tel not in NUMEROS_CREATEUR: return redirect("/")
     idx = int(request.form['index'])
     d = depots_en_attente[idx]
     if d['statut'] == 'attente':
